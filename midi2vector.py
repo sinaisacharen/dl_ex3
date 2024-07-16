@@ -1,30 +1,37 @@
-import sys
-import time
-import logging
+import pandas as np
 import pandas as pd
-import seaborn as sns
-%matplotlib inline
-import matplotlib.pyplot as plt
-import math
-import itertools
-from gensim.models import KeyedVectors
+import os
 
-os.getcwd()
-model = KeyedVectors.load('midi2vec/embeddings.bin', mmap='r')
-vectors = {}
-for word in model.index_to_key:
-    vectors[word] = model[word]
 
-df = pd.DataFrame.from_dict(vectors, orient='index')
+path_songs_name="midi2vec\edgelist"
+path_song_embedding="midi2vec"
 
-# Save to CSV
-df.to_csv('embeddings.csv')
 
-# Add Midi2Vec framework to Python working directory
-sys.path.append('../')
+# Load the list of filenames
+filenames_df=pd.read_csv(os.path.join(path_songs_name,"names.csv"))
+filenames_df["id"]=filenames_df["id"].apply(lambda x: x.replace('=',''))
+# Load the embeddings file
+# Assuming each line starts with the filename followed by embeddings
+embeddings = {}
+with open(os.path.join(path_song_embedding,"embeddings.bin"), "r") as file:
+    for line in file:
+        parts = line.strip().split()
+        # First part is the filename, rest are embeddings
+        name = parts[0]
+        vector = np.array(parts[1:], dtype=float)
+        embeddings[name] = vector
 
-from data_loading import MidiDataLoader
-from midi_to_dataframe import NoteMapper
-from pipeline import GenerativePipeline
-from optimization import BruteForce
-from evaluation import F1Evaluator, LossEvaluator
+# Match filenames with embeddings and prepare data for CSV
+data_for_csv = []
+for filename in filenames_df["id"]:
+    if filename in embeddings:
+        # Convert the numpy array to a list and prepend the filename
+        row = [filename] + embeddings[filename].tolist()
+        data_for_csv.append(row)
+
+# Create a DataFrame and write to CSV
+df = pd.DataFrame(data_for_csv)
+df['singer'] = df[0].apply(lambda x: x.split('-')[1].replace('_', ' ')[:-1])
+df['song'] = df[0].apply(lambda x: x.split('-')[2].replace('_', ' ')[1:])
+df.drop(columns=0,inplace=True)
+df.to_csv("matched_embeddings.csv", index=False, header=True)

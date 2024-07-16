@@ -13,15 +13,19 @@ class LyricsDataset(Dataset):
     Dataset class for lyrics data. This class takes input vectors and target indices 
     and provides them as PyTorch tensors.
     """
-    def __init__(self, input_vectors, target_indices):
-        self.input_vectors = input_vectors
-        self.target_indices = target_indices
+    def __init__(self, input_vectors, target_indices, midi_vectors):
+        self.input_vectors = np.array(input_vectors)
+        self.target_indices = np.array(target_indices)
+        self.midi_vectors = np.array(midi_vectors)
 
     def __len__(self):
         return len(self.input_vectors)
 
     def __getitem__(self, idx):
-        return torch.tensor(self.input_vectors[idx]), torch.tensor(self.target_indices[idx])
+        input_vec = torch.tensor(self.input_vectors[idx], dtype=torch.float32)
+        target_idx = torch.tensor(self.target_indices[idx], dtype=torch.long)
+        midi_vec = torch.tensor(self.midi_vectors[idx], dtype=torch.float32)
+        return input_vec, target_idx, midi_vec
 
 class LyricsGenerator(nn.Module):  
     """
@@ -33,10 +37,10 @@ class LyricsGenerator(nn.Module):
         self.num_layers = num_layers
         self.hidden_dim = hidden_dim
         self.embedding = nn.Embedding(vocab_size, embedding_dim)
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, num_layers, batch_first=True, dropout=0.1)
+        self.lstm = nn.LSTM(embedding_dim , hidden_dim, num_layers, batch_first=True, dropout=0.2)
         self.fc = nn.Linear(hidden_dim, vocab_size)
 
-    def forward(self, x, hidden):
+    def forward(self, x,midi, hidden):
         """
         Forward pass through the network.
         
@@ -48,7 +52,8 @@ class LyricsGenerator(nn.Module):
             out (torch.Tensor): Output predictions from the fully connected layer.
             hidden (tuple): Updated hidden state and cell state.
         """
-        out, hidden = self.lstm(x, hidden)
+        combined = torch.cat((x, midi.unsqueeze(1).repeat(1, x.size(1), 1)), dim=2)
+        out, hidden = self.lstm(combined, hidden)
         out = self.fc(out)
         return out, hidden
 
@@ -66,7 +71,7 @@ class LyricsGenerator(nn.Module):
         return (weight.new(self.num_layers, batch_size, self.hidden_dim).zero_(),
                 weight.new(self.num_layers, batch_size, self.hidden_dim).zero_())
 
-def generate_text(seed_text, model, max_length, vocab_size, word_to_idx, idx_to_word,word2vec):
+def generate_text(seed_text, model, max_length, vocab_size, word_to_idx, idx_to_word, word2vec, midi_embedding):
     """
     Generates text using the trained LSTM model starting from a seed text.
     
@@ -78,20 +83,23 @@ def generate_text(seed_text, model, max_length, vocab_size, word_to_idx, idx_to_
         word_to_idx (dict): Dictionary mapping words to their indices.
         idx_to_word (dict): Dictionary mapping indices to their words.
         word2vec (gensim.models.Word2Vec): Pre-trained Word2Vec model.
+        midi_embedding (numpy.ndarray): MIDI embedding to use during generation.
         
     Returns:
-        str: 
+        str: Generated text.
     """
     model.eval()
     words = seed_text.lower().split()
     input_indices = [word2vec.wv[word] for word in words]
-    x = torch.tensor([input_indices])  # Add batch dimension
+    x = torch.tensor([input_indices], dtype=torch.float32)  # Add batch dimension
+
+    midi = torch.tensor(midi_embedding, dtype=torch.float32).unsqueeze(0)  # Add batch dimension
 
     state_h, state_c = model.init_hidden(1)  # Initialize hidden state with batch size 1
 
     generated_words = words.copy()
     for _ in range(max_length):
-        y_pred, (state_h, state_c) = model(x, (state_h, state_c))
+        y_pred, (state_h, state_c) = model(x, midi, (state_h, state_c))
         last_word_logits = y_pred[0, -1]  # Get the last time step
         p = torch.nn.functional.softmax(last_word_logits, dim=0).detach().numpy()
         word_idx = np.random.choice(len(last_word_logits), p=p)
@@ -99,19 +107,18 @@ def generate_text(seed_text, model, max_length, vocab_size, word_to_idx, idx_to_
         generated_words.append(new_word)
 
         # Update x for the next prediction
-        input_text=generated_words[-5:]
+        input_text = generated_words[-5:]
         input_indices = [word2vec.wv[word] for word in input_text]
-        x = torch.tensor([input_indices])  # Add batch dimension
+        x = torch.tensor([input_indices], dtype=torch.float32)  # Add batch dimension
 
-    #edit the final lyrics - take the first eos or last &
-    final_lyrics=[]
+    # Edit the final lyrics - take the first eos or last &
+    final_lyrics = []
     if 'eos' in generated_words:
         # Find the index of 'eos' and take all words before it
         index = generated_words.index('eos')
         final_lyrics.append(generated_words[:index])
     if '&' in generated_words:
         # If there is no 'eos', take all the words
-        indecies = generated_words.index('&')
         last_index = len(generated_words) - 1 - generated_words[::-1].index('&')
         final_lyrics.append(generated_words[:last_index])
     else:
