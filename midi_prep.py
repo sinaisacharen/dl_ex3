@@ -62,12 +62,12 @@ def wpm_scaler(tempo, time_of_song, num_words):
     
     # Estimate words per minute based on tempo
     estimated_wpm = scaler.transform([[tempo]])[0][0]
-    print(f'Estimated WPM: {estimated_wpm}')
+    # print(f'Estimated WPM: {estimated_wpm}')
     # Estimate the number of words in the song
     
     estimated_words = estimated_wpm * (time_of_song/60)
-    print(f'Estimated words: {estimated_words}')
-    print(f'Actual words: {num_words}')
+    # print(f'Estimated words: {estimated_words}')
+    # print(f'Actual words: {num_words}')
     
     # Raise error if the estimated words are significantly different from the actual words
     if abs(estimated_words - num_words) > 10000:
@@ -213,20 +213,25 @@ if __name__ == "__main__":
 
     # file = '2_unlimited_-_get_ready_for_this.mid'
 
-    columns = list(range(embedding_dim)) + ['singer', 'song']
+    columns = list(range(1,embedding_dim+1)) + ['singer', 'song']
 
     midi_df_embedding =  pd.DataFrame(columns=columns)
 
     # loop through the midi files
-    for file in tqdm(enumerate(os.listdir('midi_files'))):
-        if file[1].endswith('.mid'):
+    for file in os.listdir('midi_files'):
+        if file.endswith('.mid'):
             try:
-                print(f'Processing {file[1]}')
-                midi_data = pretty_midi.PrettyMIDI('midi_files/' + file[1])
+                print(f'Processing {file}')
+                midi_data = pretty_midi.PrettyMIDI('midi_files/' + file)
             except:
-                print(f'Error processing {file[1]}')
+                # in red
+                red = "\033[1;31m"
+                print(f'{red} Error loading {file}')
+                # stop the red
+                print("\033[0m")
+                    
                 continue
-            imbed_vec, artis_name, song_name = main(file[1], train_songs, test_songs, midi_data)
+            imbed_vec, artis_name, song_name = main(file, train_songs, test_songs, midi_data)
 
             row_data = list(imbed_vec) + [artis_name, song_name]
         
@@ -236,5 +241,7 @@ if __name__ == "__main__":
 
 
     # save the midi_df_embedding
-    midi_df_embedding.to_csv(os.getcwd+'matched_embeddings.csv', index=False)
+    # change the coloms to start from 1
+    
+    midi_df_embedding.to_csv(os.getcwd()+'/sinai_matched_embeddings.csv', index=False)
 
